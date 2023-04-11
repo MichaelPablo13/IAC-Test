@@ -1,0 +1,104 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 
+  EC2 NGINX
+
+# getting the name of the base stack which is created first and has VPC details
+Parameters: 
+  VPCStackName:
+    Description: Nome VPC stack
+    Type: String
+    Default: infra-base-for-nginx
+
+  KeyPairName:
+    Description: Name of an existing EC2 KeyPair to enable SSH access to the instance
+    Type: 'AWS::EC2::KeyPair::KeyName'  # standard type
+    ConstraintDescription: must be the name of an existing EC2 KeyPair.
+
+  InstanceType:
+    Description: EC2 instance type
+    Type: String
+    Default: t2.micro
+
+  InstanceImageId:
+    Description: EC2 Image Id from this region
+    Type: AWS::EC2::Image::Id
+    Default: ami-09e67e426f25ce0d7 # defaults for amazon linux in us-east-1 region
+
+Resources: 
+  # create a security group
+  customSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: NginxWebServer-SG
+      GroupDescription: Enable http(80) & ssh(22) access
+      VpcId:
+        Fn::ImportValue: !Sub "${VPCStackName}-VPCID" # it is different then AWS::StackName
+      SecurityGroupIngress:
+        # allow http
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: 0.0.0.0/0 # non-specific IP
+        # allow ssh  
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: 0.0.0.0/0 # this is for demo otherwise use personal local IP or more secured corporate gateway IP
+      Tags:
+        - Key:  Name
+          Value:  nginxdemo-sg
+        - Key:  Application
+          Value:
+            Ref: "AWS::StackName"
+
+  # allow local traffic
+  SGBaseIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref customSG
+      IpProtocol: '-1'
+      FromPort: '-1'
+      ToPort: '-1'
+      SourceSecurityGroupId: !Ref customSG
+
+  # EC2 instance which will have access for http and ssh
+  EC2Instance:
+    Type: 'AWS::EC2::Instance'
+    Properties:
+      InstanceType: !Ref InstanceType
+      SubnetId:
+        Fn::ImportValue: !Sub "${VPCStackName}-SUBNET"      
+      SecurityGroupIds:
+        - !Ref customSG
+      KeyName: !Ref KeyPairName
+      ImageId: !Ref InstanceImageId
+      UserData: 
+        Fn::Base64: |
+          #!/bin/bash -xe
+          sudo apt-get update -y # good practice to update existing packages
+          sudo apt-get install nginx -y # install web server           
+
+      Tags: 
+          - Key: Name
+            Value: nginxdemo-ec2
+          - Key: Application
+            Value:
+              Ref: "AWS::StackName"
+
+# output important values for easy viewing in cloudformation dashboard
+Outputs:
+  InstanceId:
+    Description: InstanceId of the first EC2 instance
+    Value: !Ref EC2Instance
+
+  PublicDNS:
+    Description: Public DNS Name of the EC2 instance
+    Value: !GetAtt 
+      - EC2Instance
+      - PublicDnsName
+
+  PublicIP:
+    Description: Public IP address of the EC2 instance
+    Value: !GetAtt 
+      - EC2Instance
+      - PublicIp
